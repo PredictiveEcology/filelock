@@ -122,8 +122,10 @@ SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout) {
     ret = fcntl(filedes, F_SETLK, &lck);
     if (ret == -1) {
       if (errno == EAGAIN || errno == EACCES) {
+	close(filedes);
 	return R_NilValue;
       }
+      close(filedes);
       error("Cannot lock file: '%s': %s", c_path, strerror(errno));
     }
 
@@ -134,6 +136,7 @@ SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout) {
 
   /* Failed to acquire the lock? */
   if (ret) {
+    close(filedes);
     return R_NilValue;
   } else {
     return filelock__list_add(c_path, filedes, c_exclusive);

@@ -220,10 +220,12 @@ SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout) {
   }
 
   if (ret) {
+    CloseHandle(file);
     filelock__error("Lock file: ", ret);
   }
 
   if (!locked) {
+    CloseHandle(file);
     return R_NilValue;
   } else {
     return filelock__list_add(c_path, file, c_exclusive);
