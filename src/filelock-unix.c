@@ -152,6 +152,7 @@ static SEXP filelock_lock_worker(void *data)
     {
       if (errno == EAGAIN || errno == EACCES)
       {
+        close(args->filedes);
         return R_NilValue;
       }
       error("Cannot lock file: '%s': %s", args->c_path, strerror(errno));

@@ -388,3 +388,21 @@ test_that("clean up file descriptor on timeout", {
   }
   expect_true(!normalizePath(tmp) %in% normalizePath(of$path))
 })
+
+test_that("clean up file descriptor on failed lock with timeout = 0", {
+  skip_on_cran()
+  tmp <- tempfile()
+  rs <- callr::r_session$new()
+  on.exit(rs$close(), add = TRUE)
+  rs$run(function(path) .GlobalEnv$lck <- filelock::lock(path), list(tmp))
+
+  n_open <- function() {
+    of <- ps::ps_open_files(ps::ps_handle())
+    sum(normalizePath(of$path, mustWork = FALSE) == normalizePath(tmp))
+  }
+  before <- n_open()
+  for (i in 1:5) {
+    expect_null(lock(tmp, timeout = 0))
+  }
+  expect_equal(n_open(), before)
+})

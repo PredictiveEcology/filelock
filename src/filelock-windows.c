@@ -86,7 +86,10 @@ int filelock__lock_wait(HANDLE file, int exclusive) {
     DWORD err = GetLastError();
     while (1) {
       DWORD wres;
-      if (err != ERROR_IO_PENDING) filelock__error("Locking file: ", err);
+      if (err != ERROR_IO_PENDING) {
+	CloseHandle(file);
+	filelock__error("Locking file: ", err);
+      }
 
       wres = WaitForSingleObject(ov.hEvent, FILELOCK_INTERRUPT_INTERVAL);
       if (wres == WAIT_TIMEOUT) {
@@ -95,9 +98,11 @@ int filelock__lock_wait(HANDLE file, int exclusive) {
 	CloseHandle(ov.hEvent);
 	return 0;
       } else if (wres == WAIT_FAILED) {
+	err = GetLastError();
 	CancelIo(file);
 	CloseHandle(ov.hEvent);
-	filelock__error("Locking file (timeout): ", GetLastError());
+	CloseHandle(file);
+	filelock__error("Locking file (timeout): ", err);
       }
 
       /* Check for interrupt and try again */
@@ -134,7 +139,10 @@ int filelock__lock_timeout(HANDLE file, int exclusive, int timeout, int *locked)
       DWORD wres;
       int waitnow;
 
-      if (err != ERROR_IO_PENDING) filelock__error("Locking file: ", err);
+      if (err != ERROR_IO_PENDING) {
+	CloseHandle(file);
+	filelock__error("Locking file: ", err);
+      }
 
       waitnow = timeleft < FILELOCK_INTERRUPT_INTERVAL ? timeleft :
 	FILELOCK_INTERRUPT_INTERVAL;
@@ -145,9 +153,11 @@ int filelock__lock_timeout(HANDLE file, int exclusive, int timeout, int *locked)
 	*locked = 1;
 	break;
       } else {
+	err = GetLastError();
 	CancelIo(file);
 	CloseHandle(ov.hEvent);
-	filelock__error("Locking file (timeout): ", GetLastError());
+	CloseHandle(file);
+	filelock__error("Locking file (timeout): ", err);
       }
 
       /* Check for interrupt and try again */
@@ -220,10 +230,12 @@ SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout) {
   }
 
   if (ret) {
+    CloseHandle(file);
     filelock__error("Lock file: ", ret);
   }
 
   if (!locked) {
+    CloseHandle(file);
     return R_NilValue;
   } else {
     return filelock__list_add(c_path, file, c_exclusive);
