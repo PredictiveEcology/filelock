@@ -112,6 +112,14 @@
 #'   then the process will wait indefinitely to acquire the lock. If zero,
 #'   then the function it returns immediately, with or without acquiring
 #'   the lock
+#' @param remove If `TRUE`, `unlock()` deletes the lock file just before
+#'   releasing an exclusive lock (the last reference to it), so a lock file
+#'   exists only while it is in use. A process waiting on the deleted file
+#'   then finds it gone and `lock()` starts over on a new file: `lock()`
+#'   always checks that the file it locked is still the one at `path`. A
+#'   crash leaves the file behind; the next `unlock(remove = TRUE)` on it
+#'   deletes it. Ignored on Windows, where a file other processes have open
+#'   cannot be deleted.
 #' @param lock The lock object to unlock. It is not an error to try to
 #'   unlock an already unlocked lock. It is not possible to lock an
 #'   unlocked lock again, a new lock has to be requested.
@@ -166,11 +174,12 @@ lock <- function(path, exclusive = TRUE, timeout = Inf) {
 #' @export
 #' @rdname lock
 
-unlock <- function(lock) {
+unlock <- function(lock, remove = FALSE) {
   if (!inherits(lock, "filelock_lock")) {
     stop("`unlock()` needs a lock object, not a file name")
   }
-  .Call(c_filelock_unlock, lock)
+  stopifnot(is_flag(remove))
+  .Call(c_filelock_unlock, lock, remove)
 }
 
 #' @export

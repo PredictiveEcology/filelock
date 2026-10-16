@@ -77,6 +77,8 @@ int filelock__interruptible(int filedes, struct flock *lck,
     /* If ret != -1, then we have the lock, return.
        If -1, but not EINTR, then a real error happened. */
     if (ret != -1) { ret = 0; break; }
+    /* NFS: the file was deleted by its holder (unlock(remove = TRUE)); start over */
+    if (errno == ESTALE) { ret = 2; break; }
     if (ret == -1 && errno != EINTR) {
       error("Cannot lock file: '%s': %s", c_path, strerror(errno));
     }
@@ -87,6 +89,14 @@ int filelock__interruptible(int filedes, struct flock *lck,
   }
 
   return ret;
+}
+
+/* Is the open file `filedes` the file now at `path`? */
+static int filelock__same_file(int filedes, const char *path) {
+  struct stat open_st, path_st;
+  if (fstat(filedes, &open_st) == -1) error("Cannot stat lock file: %s", strerror(errno));
+  if (stat(path, &path_st) == -1) return 0;
+  return open_st.st_dev == path_st.st_dev && open_st.st_ino == path_st.st_ino;
 }
 
 SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout) {
@@ -114,39 +124,58 @@ SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout) {
   lck.l_start = 0;
   lck.l_len = 0;
 
-  filedes = open(c_path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-  if (filedes == -1) error("Cannot open lock file: %s", strerror(errno));
+  for (;;) {
+    filedes = open(c_path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    if (filedes == -1) error("Cannot open lock file: %s", strerror(errno));
 
-  /* One shot only? Do not block if cannot lock */
-  if (c_timeout == 0) {
-    ret = fcntl(filedes, F_SETLK, &lck);
-    if (ret == -1) {
-      if (errno == EAGAIN || errno == EACCES) {
-	close(filedes);
-	return R_NilValue;
+    /* One shot only? Do not block if cannot lock */
+    if (c_timeout == 0) {
+      ret = fcntl(filedes, F_SETLK, &lck);
+      if (ret == -1) {
+        if (errno == EAGAIN || errno == EACCES) {
+          close(filedes);
+          return R_NilValue;
+        }
+        if (errno == ESTALE) {
+          close(filedes);
+          continue;
+        }
+        close(filedes);
+        error("Cannot lock file: '%s': %s", c_path, strerror(errno));
       }
-      close(filedes);
-      error("Cannot lock file: '%s': %s", c_path, strerror(errno));
+
+    } else {
+      ret = filelock__interruptible(filedes, &lck, c_path, c_exclusive,
+                                    c_timeout);
     }
 
-  } else {
-    ret = filelock__interruptible(filedes, &lck, c_path, c_exclusive,
-				  c_timeout);
-  }
+    if (ret == 2) {
+      close(filedes);
+      continue;
+    }
 
-  /* Failed to acquire the lock? */
-  if (ret) {
+    /* Failed to acquire the lock? */
+    if (ret) {
+      close(filedes);
+      return R_NilValue;
+    }
+
+    /* The holder before us may have deleted the file (unlock(remove = TRUE)) while we
+       waited, so our lock is on a file that is no longer at `path`, and a newcomer may
+       lock the new one. Only a lock on the file now at `path` counts: else start over.
+       The timeout restarts for the new attempt. */
+    if (filelock__same_file(filedes, c_path)) {
+      return filelock__list_add(c_path, filedes, c_exclusive);
+    }
     close(filedes);
-    return R_NilValue;
-  } else {
-    return filelock__list_add(c_path, filedes, c_exclusive);
   }
 }
 
-SEXP filelock_unlock(SEXP lock) {
+SEXP filelock_unlock(SEXP lock, SEXP remove) {
   void *ptr = R_ExternalPtrAddr(VECTOR_ELT(lock, 0));
   const char *c_path;
   filelock__list_t *node;
+  int c_remove = LOGICAL(remove)[0];
 
   if (!ptr) return ScalarLogical(1);
 
@@ -157,6 +186,9 @@ SEXP filelock_unlock(SEXP lock) {
   if (node) {
     node->refcount -= 1;
     if (!node->refcount) {
+      /* Delete while still holding the lock: a waiter then finds the file gone and
+         starts over on a new one (see filelock_lock()) */
+      if (c_remove && node->exclusive) unlink(c_path);
       close(node->file);
       filelock__list_remove(c_path);
     }

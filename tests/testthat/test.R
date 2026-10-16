@@ -332,3 +332,46 @@ test_that("non-exclusive lock with timeout", {
 test_that("unlock() needs lock object", {
   expect_snapshot(error = TRUE, unlock(1))
 })
+
+test_that("unlock(remove = TRUE) deletes the lock file", {
+  tmp <- tempfile()
+  lck <- lock(tmp)
+  expect_true(file.exists(tmp))
+  unlock(lck, remove = TRUE)
+  expect_false(file.exists(tmp))
+
+  ## a shared lock, or a nested reference, does not delete it
+  lck <- lock(tmp, exclusive = FALSE)
+  unlock(lck, remove = TRUE)
+  expect_true(file.exists(tmp))
+  lck1 <- lock(tmp)
+  lck2 <- lock(tmp)
+  unlock(lck2, remove = TRUE)
+  expect_true(file.exists(tmp))
+  unlock(lck1, remove = TRUE)
+  expect_false(file.exists(tmp))
+})
+
+test_that("a waiter whose file was deleted locks the new file at the path", {
+  skip_on_cran()
+  skip_on_os("windows")
+  tmp <- tempfile()
+  lck <- lock(tmp)
+
+  ## px waits on the file we hold, then reports whether, holding its lock, the path is locked
+  px <- callr::r_bg(function(path) {
+    l <- filelock::lock(path, timeout = 10000)
+    if (is.null(l)) return("no lock")
+    Sys.sleep(3)
+    "done"
+  }, args = list(path = tmp))
+  Sys.sleep(1.5) # px is now waiting on the file we hold
+  unlock(lck, remove = TRUE)
+  Sys.sleep(0.8) # px takes the lock, finds the file gone, locks a new one at tmp
+
+  ## px holds tmp, so we must not get it; on a deleted file we would, wrongly
+  expect_true(file.exists(tmp))
+  expect_null(lock(tmp, timeout = 0))
+  px$wait(5000)
+  expect_identical(px$get_result(), "done")
+})
