@@ -412,6 +412,11 @@ test_that("interrupted lock() does not leak a file descriptor (#28)", {
   rs$interrupt()
   rs$poll_io(5000)
   res <- rs$read()
-  expect_s3_class(res$error$parent, "interrupt")
+  if (.Platform$OS.type == "windows") {
+    ## the Windows wait closes the handle itself and reports the interrupt as an error
+    expect_match(conditionMessage(res$error$parent), "Locking interrupted", fixed = TRUE)
+  } else {
+    expect_s3_class(res$error$parent, "interrupt")
+  }
   expect_true(wait_for(function() !is_open()))
 })
