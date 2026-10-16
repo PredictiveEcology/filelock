@@ -5,6 +5,10 @@
   still the one at `path`, and starts over if it was deleted while it waited, so deleting is safe.
   `remove` is ignored on Windows.
 
+* `lock()` now closes the lock file if it fails to acquire the lock,
+  because of a timeout, an error or an interrupt. Before, every failed
+  `lock()` call leaked a file descriptor (a file handle on Windows) (#28).
+
 * Error messages now include the path of the lock file when locking fails,
   and follow the tidyverse error style, e.g. "Can't open lock file
   `<path>`: Permission denied." (#30).

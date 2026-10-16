@@ -96,6 +96,7 @@ int filelock__lock_wait(HANDLE file, int exclusive, const char *path) {
     while (1) {
       DWORD wres;
       if (err != ERROR_IO_PENDING) {
+	CloseHandle(file);
 	filelock__error("lock file", path, err);
       }
 
@@ -106,9 +107,11 @@ int filelock__lock_wait(HANDLE file, int exclusive, const char *path) {
 	CloseHandle(ov.hEvent);
 	return 0;
       } else if (wres == WAIT_FAILED) {
+	err = GetLastError();
 	CancelIo(file);
 	CloseHandle(ov.hEvent);
-	filelock__error("lock file (timeout)", path, GetLastError());
+	CloseHandle(file);
+	filelock__error("lock file (timeout)", path, err);
       }
 
       /* Check for interrupt and try again */
@@ -147,6 +150,7 @@ int filelock__lock_timeout(HANDLE file, int exclusive, int timeout,
       int waitnow;
 
       if (err != ERROR_IO_PENDING) {
+	CloseHandle(file);
 	filelock__error("lock file", path, err);
       }
 
@@ -159,9 +163,11 @@ int filelock__lock_timeout(HANDLE file, int exclusive, int timeout,
 	*locked = 1;
 	break;
       } else {
+	err = GetLastError();
 	CancelIo(file);
 	CloseHandle(ov.hEvent);
-	filelock__error("lock file (timeout)", path, GetLastError());
+	CloseHandle(file);
+	filelock__error("lock file (timeout)", path, err);
       }
 
       /* Check for interrupt and try again */

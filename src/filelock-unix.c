@@ -94,6 +94,28 @@ int filelock__interruptible(int filedes, struct flock *lck,
   return ret;
 }
 
+struct filelock__interruptible_data {
+  int filedes;
+  struct flock *lck;
+  const char *c_path;
+  int c_exclusive;
+  int c_timeout;
+  int ret;
+};
+
+SEXP filelock__interruptible_body(void *data) {
+  struct filelock__interruptible_data *d = data;
+  d->ret = filelock__interruptible(d->filedes, d->lck, d->c_path,
+				   d->c_exclusive, d->c_timeout);
+  return R_NilValue;
+}
+
+/* Close the file if an error or an interrupt jumps out of the wait */
+void filelock__interruptible_cleanup(void *data, Rboolean jump) {
+  struct filelock__interruptible_data *d = data;
+  if (jump) close(d->filedes);
+}
+
 /* Is the open file `filedes` the file now at `path`? */
 static int filelock__same_file(int filedes, const char *path) {
   struct stat open_st, path_st;
@@ -141,17 +163,26 @@ SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout) {
       if (ret == -1) {
         int err = errno;
         close(filedes);
-        if (err == EAGAIN || err == EACCES) return R_NilValue;
+        if (err == EAGAIN || err == EACCES) {
+          return R_NilValue;
+        }
         /* NFS: the file was deleted by its holder (unlock(remove = TRUE)); start over */
         if (err == ESTALE) continue;
         error("Can't lock file `%s`: %s.", c_path, strerror(err));
       }
 
     } else {
-      ret = filelock__interruptible(filedes, &lck, c_path, c_exclusive,
-                                    c_timeout);
+      struct filelock__interruptible_data d = {
+        filedes, &lck, c_path, c_exclusive, c_timeout, 1
+      };
+      SEXP cont = PROTECT(R_MakeUnwindCont());
+      R_UnwindProtect(filelock__interruptible_body, &d,
+                      filelock__interruptible_cleanup, &d, cont);
+      UNPROTECT(1);
+      ret = d.ret;
     }
 
+    /* The file was deleted while we waited (ESTALE on NFS): start over */
     if (ret == 2) {
       close(filedes);
       continue;
