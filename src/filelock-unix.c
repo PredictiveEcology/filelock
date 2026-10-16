@@ -15,6 +15,7 @@
 #define FILELOCK_INTERRUPT_INTERVAL 200
 
 struct sigaction filelock_old_sa;
+struct itimerval filelock_old_timer;
 
 void filelock__finalizer(SEXP x) {
   filelock__list_t *ptr = (filelock__list_t*) R_ExternalPtrAddr(x);
@@ -33,6 +34,8 @@ void filelock__finalizer(SEXP x) {
 void filelock__alarm_callback (int signum) {
   /* Restore signal handler */
   sigaction(SIGALRM, &filelock_old_sa, 0);
+  /* Restore timer state */
+  setitimer(ITIMER_REAL, &filelock_old_timer, 0);
 }
 
 int filelock__interruptible(int filedes, struct flock *lck,
@@ -63,7 +66,7 @@ int filelock__interruptible(int filedes, struct flock *lck,
     sa.sa_handler = &filelock__alarm_callback;
     sigaction(SIGALRM, &sa, &filelock_old_sa);
 
-    setitimer(ITIMER_REAL, &timer, 0);
+    setitimer(ITIMER_REAL, &timer, &filelock_old_timer);
     ret = fcntl(filedes, F_SETLKW, lck);
 
     /* We need to remove the timer here, to avoid getting a signal
@@ -80,7 +83,7 @@ int filelock__interruptible(int filedes, struct flock *lck,
     /* NFS: the file was deleted by its holder (unlock(remove = TRUE)); start over */
     if (errno == ESTALE) { ret = 2; break; }
     if (ret == -1 && errno != EINTR) {
-      error("Cannot lock file: '%s': %s", c_path, strerror(errno));
+      error("Can't lock file `%s`: %s.", c_path, strerror(errno));
     }
 
     /* Otherwise, need to wait, check for interrupts, and start over */
@@ -94,7 +97,9 @@ int filelock__interruptible(int filedes, struct flock *lck,
 /* Is the open file `filedes` the file now at `path`? */
 static int filelock__same_file(int filedes, const char *path) {
   struct stat open_st, path_st;
-  if (fstat(filedes, &open_st) == -1) error("Cannot stat lock file: %s", strerror(errno));
+  if (fstat(filedes, &open_st) == -1) {
+    error("Can't stat lock file `%s`: %s.", path, strerror(errno));
+  }
   if (stat(path, &path_st) == -1) return 0;
   return open_st.st_dev == path_st.st_dev && open_st.st_ino == path_st.st_ino;
 }
@@ -113,9 +118,9 @@ SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout) {
 	(!c_exclusive && !node->exclusive)) {
       return filelock__make_lock_handle(node);
     } else if (c_exclusive) {
-      error("File already has a shared lock");
+      error("File `%s` already has a shared lock.", c_path);
     } else {
-      error("File already has an exclusive lock");
+      error("File `%s` already has an exclusive lock.", c_path);
     }
   }
 
@@ -126,22 +131,20 @@ SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout) {
 
   for (;;) {
     filedes = open(c_path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-    if (filedes == -1) error("Cannot open lock file: %s", strerror(errno));
+    if (filedes == -1) {
+      error("Can't open lock file `%s`: %s.", c_path, strerror(errno));
+    }
 
     /* One shot only? Do not block if cannot lock */
     if (c_timeout == 0) {
       ret = fcntl(filedes, F_SETLK, &lck);
       if (ret == -1) {
-        if (errno == EAGAIN || errno == EACCES) {
-          close(filedes);
-          return R_NilValue;
-        }
-        if (errno == ESTALE) {
-          close(filedes);
-          continue;
-        }
+        int err = errno;
         close(filedes);
-        error("Cannot lock file: '%s': %s", c_path, strerror(errno));
+        if (err == EAGAIN || err == EACCES) return R_NilValue;
+        /* NFS: the file was deleted by its holder (unlock(remove = TRUE)); start over */
+        if (err == ESTALE) continue;
+        error("Can't lock file `%s`: %s.", c_path, strerror(err));
       }
 
     } else {

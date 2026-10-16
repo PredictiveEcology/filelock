@@ -5,6 +5,10 @@
   still the one at `path`, and starts over if it was deleted while it waited, so deleting is safe.
   `remove` is ignored on Windows.
 
+* Error messages now include the path of the lock file when locking fails,
+  and follow the tidyverse error style, e.g. "Can't open lock file
+  `<path>`: Permission denied." (#30).
+
 # filelock 1.0.3
 
 * No user visible changes.
