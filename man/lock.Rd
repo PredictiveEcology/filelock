@@ -7,7 +7,7 @@
 \usage{
 lock(path, exclusive = TRUE, timeout = Inf)
 
-unlock(lock)
+unlock(lock, remove = FALSE)
 }
 \arguments{
 \item{path}{Path to the file to lock. If the file does not exist, it
@@ -32,6 +32,15 @@ the lock}
 \item{lock}{The lock object to unlock. It is not an error to try to
 unlock an already unlocked lock. It is not possible to lock an
 unlocked lock again, a new lock has to be requested.}
+
+\item{remove}{If \code{TRUE}, \code{unlock()} deletes the lock file just before
+releasing an exclusive lock (the last reference to it), so a lock file
+exists only while it is in use. A process waiting on the deleted file
+then finds it gone and \code{lock()} starts over on a new file: \code{lock()}
+always checks that the file it locked is still the one at \code{path}. A
+crash leaves the file behind; the next \code{unlock(remove = TRUE)} on it
+deletes it. Ignored on Windows, where a file other processes have open
+cannot be deleted.}
 }
 \value{
 \code{lock} returns a \code{filelock_lock} object if the lock was

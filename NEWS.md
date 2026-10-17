@@ -1,5 +1,10 @@
 # filelock (development version)
 
+* `unlock()` gains `remove`: `unlock(lock, remove = TRUE)` deletes the lock file before releasing an
+  exclusive lock, so lock files exist only while in use. `lock()` now checks that the file it locked is
+  still the one at `path`, and starts over if it was deleted while it waited, so deleting is safe.
+  `remove` is ignored on Windows.
+
 * `lock()` now closes the lock file if it fails to acquire the lock,
   because of a timeout, an error or an interrupt. Before, every failed
   `lock()` call leaked a file descriptor (a file handle on Windows) (#28).

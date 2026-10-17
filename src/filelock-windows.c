@@ -252,7 +252,9 @@ SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout) {
   }
 }
 
-SEXP filelock_unlock(SEXP lock) {
+/* `remove` is ignored on Windows: a file other processes have open cannot be deleted
+   there, so the lock file is kept. */
+SEXP filelock_unlock(SEXP lock, SEXP remove) {
   void *ptr = R_ExternalPtrAddr(VECTOR_ELT(lock, 0));
   const char *c_path;
   filelock__list_t *node;

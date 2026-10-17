@@ -8,7 +8,7 @@
 #endif
 
 SEXP filelock_lock(SEXP path, SEXP exclusive, SEXP timeout);
-SEXP filelock_unlock(SEXP path);
+SEXP filelock_unlock(SEXP lock, SEXP remove);
 SEXP filelock_is_unlocked(SEXP lock);
 
 /* ------------------------------------------------------------------ */
